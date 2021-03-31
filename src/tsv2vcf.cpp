@@ -1,4 +1,5 @@
 #include <savvy/writer.hpp>
+#include <optional>
 #include <savvy/reader.hpp>
 #include "cxxopts.hpp"
 #include "vcf_header.hpp"
@@ -7,22 +8,6 @@
 #include <string_view>
 #include <array>
 #include <charconv>
-
-//savvy::writer out("out.bcf", savvy::fmt::bcf, in.headers(), in.samples());
-
-
-
-// constexpr std::array< make_array() -> std::array<T, N>
-// {
-//     std::array<T, N> a{};
-//     int i=0;
-//     int j=0;
-//     for (auto& x : a){
-//         x = value;
-//     }
-
-//     return a;
-// }
 
 constexpr std::array<char,255> encoding_map(){
   std::array<char,255> retmap{};
@@ -35,7 +20,7 @@ constexpr std::array<char,255> encoding_map(){
   retmap[10]=7;
   retmap[9]=8;
   return retmap;
-          }
+}
 
 
 int encode_string(const std::string& input,std::string& output){
@@ -85,9 +70,11 @@ int main(int argc, char** argv){
   options.add_options()
     ("a,assembly", "Human genome assemby to use (currently only 'grch37' and 'grch38' are supported (default is grch38)", cxxopts::value<std::string>()->default_value("grch38"))
     ("n,ncbi", "whether to use NCBI style sequence names (no 'chr' prefix))", cxxopts::value<bool>()->default_value("false"))
-    ("o,output", "file to write output to", cxxopts::value<std::string>())
+    ("o,output", "prefix of file to write output to", cxxopts::value<std::string>())
     ("i,input", "file to read from", cxxopts::value<std::string>())
     ("b,bcf", "whether to create a bcf header", cxxopts::value<bool>()->default_value("false"))
+    ("s,split_chrom", "split output by chromosome", cxxopts::value<bool>()->default_value("false"))
+    ("c,chunk_size", "number of rows per chunk (can be combined with split_chrom)", cxxopts::value<std::int64_t>())
     ("h,help", "Print usage");
   auto result = options.parse(argc, argv);
    if (result.count("help"))
@@ -107,10 +94,17 @@ int main(int argc, char** argv){
       std::cout << options.help() << std::endl;
       exit(1);
     }
+   const bool is_bcf = result.count("bcf")>0;
+   const bool is_split = result.count("split_chrom")>0;
+
+   std::optional<std::int64_t>chunk_size = result.count("chunk_size")>0 ? std::optional<std::int64_t>(result["chunk_size"].as<std::int64_t>()) : std::optional<std::int64_t>(std::nullopt);
+
+
    const std::string output=result["output"].as<std::string>();
    const std::string input=result["input"].as<std::string>();
    const bool is_hg38=result["assembly"].as<std::string>()=="grch38";
-   auto fmto = result.count("bcf")>0 ? savvy::file::format::bcf : savvy::file::format::vcf;
+   auto fmto = is_bcf ? savvy::file::format::bcf : savvy::file::format::vcf;
+
    const bool is_ncbi=result.count("ncbi")>0;
 
    static_assert(GRCh38::seqname(0,true)[0]!='c');
@@ -124,26 +118,11 @@ int main(int argc, char** argv){
    static_assert(GRCh37::seqname(0,false)[0]!='1');
 
    std::vector<std::string> sample_ids = {};
-   std::vector<std::pair<std::string, std::string>> headers;
-   if(is_hg38){
-     headers.reserve(GRCh38::num_seqs+3);
-     headers.push_back({"fileformat", "VCFv4.2"});
-     headers.push_back({"FILTER", "<ID=PASS,Description=\"All filters passed\">"});
-     headers.push_back(    {"INFO",
-         "<ID=ANNO,Number=1,Type=String,Description=\"Annotation at site\">"});
-     for(int i=0; i<GRCh38::num_seqs; i++){
-       headers.emplace_back(contig_as_header<GRCh38>(i,is_ncbi));
-     }
-   }else{
-     headers.reserve(GRCh37::num_seqs+3);
-     headers.push_back({"fileformat", "VCFv4.2"});
-     headers.push_back({"FILTER", "<ID=PASS,Description=\"All filters passed\">"});
-     headers.push_back(    {"INFO",
-         "<ID=ANNO,Number=1,Type=String,Description=\"Annotation at site\">"});
-     for(int i=0; i<GRCh37::num_seqs; i++){
-       headers.emplace_back(contig_as_header<GRCh37>(i,is_ncbi));
-     }
-   }
+   std::vector<std::pair<std::string, std::string>> headers = is_hg38 ?      headers=make_header<GRCh38>(is_ncbi) :      headers=make_header<GRCh37>(is_ncbi);
+
+   headers.push_back(    {"INFO",
+       "<ID=ANNO,Number=1,Type=String,Description=\"Annotation at site\">"});
+
    savvy::writer out(output, fmto, headers, sample_ids);
    shrinkwrap::bgzf::istream is(input);
    std::string chr_field;
@@ -158,7 +137,6 @@ int main(int argc, char** argv){
      std::getline(is,chr_field,'\t');
      std::getline(is,pos_field,'\t');
      std::getline(is,ref_field,'\t');
-
      std::getline(is,alt_field,'\t');
      std::getline(is,annotation_field,'\n');
      std::from_chars(pos_field.data(),pos_field.data()+pos_field.size(),pos);
