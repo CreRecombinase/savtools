@@ -79,7 +79,6 @@ auto idxr = ranges::views::ints(0,tot_size) | ranges::views::sample(sample_num,e
   f.reset_bounds({static_cast<std::uint64_t>(min),static_cast<std::uint64_t>(max)});
 
   auto getlv = ranges::getvariants(f);
-
   //int i=min;
   int i=0;
   for(savvy::variant & var: getlv){

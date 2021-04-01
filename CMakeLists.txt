@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 #include(FetchSavvyDependency.cmake)
 #list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/CMake")
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 # FetchContent_Declare(
 #   savvy
 #   GIT_REPOSITORY https://github.com/CreRecombinase/savvy.git
